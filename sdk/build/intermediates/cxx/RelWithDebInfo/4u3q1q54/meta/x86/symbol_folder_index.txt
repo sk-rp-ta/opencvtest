@@ -1,0 +1,1 @@
+C:\Users\milos\AndroidStudioProjects\opencvtest\sdk\build\intermediates\cxx\RelWithDebInfo\4u3q1q54\obj\x86
