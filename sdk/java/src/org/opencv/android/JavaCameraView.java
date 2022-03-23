@@ -1,5 +1,7 @@
 package org.opencv.android;
 
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 
@@ -46,14 +48,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
     private SurfaceTexture mSurfaceTexture;
     private int mPreviewFormat = ImageFormat.NV21;
     public CircularFifoQueue<byte[]> frames;
-    public static ArrayBlockingQueue<byte[]> YUVQueue = new ArrayBlockingQueue<byte[]>(100);
-
-    public void putYUVData(byte[] buffer, int length) {
-        if (YUVQueue.size() >= 100) {
-            YUVQueue.poll();
-        }
-        YUVQueue.add(buffer);
-    }
+    private boolean recordingFlag = false;
 
     public static class JavaCameraSizeAccessor implements ListItemAccessor {
 
@@ -81,7 +76,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
     protected boolean initializeCamera(int width, int height) {
         Log.d(TAG, "Initialize java camera");
         boolean result = true;
-        frames = new CircularFifoQueue<byte[]>(1000);
+        frames = new CircularFifoQueue<byte[]>(100);
         synchronized (this) {
             mCamera = null;
 
@@ -152,6 +147,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
             /* Now set camera parameters */
             try {
                 Camera.Parameters params = mCamera.getParameters();
+
                 Log.d(TAG, "getSupportedPreviewSizes()");
                 List<android.hardware.Camera.Size> sizes = params.getSupportedPreviewSizes();
 
@@ -313,7 +309,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
     @Override
     public void onPreviewFrame(byte[] frame, Camera arg1) {
         if (BuildConfig.DEBUG)
-            Log.d(TAG, "Preview Frame received. Frame size: " + frame.length);
+            //Log.d(TAG, "Preview Frame received. Frame size: " + frame.length);
         synchronized (this) {
             //filling circular buffer
             frames.add(frame);

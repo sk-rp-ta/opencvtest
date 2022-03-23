@@ -1,12 +1,13 @@
 package com.ms.opencvtest;
 
 import static android.media.MediaCodec.MetricsConstants.MIME_TYPE;
-
+import android.media.MediaCodec.BufferInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
+import android.media.CamcorderProfile;
 import android.media.Image;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
@@ -65,7 +66,7 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     private FileOutputStream fos;
     private int BPP = 8;
     private int FRAME_RATE = 30;
-    private BlockingQueue<Bitmap> bitmaps;
+    private AvcEncoder encoder;
 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -76,20 +77,17 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
         path = getExternalFilesDir("/").getAbsolutePath();
         Log.d(TAG, path);
         openCamera();
-
+        encoder = new AvcEncoder(1280,720,path+"/file");
         btnRecord.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) {
                 if (view == btnRecord) {
                     //copy frames from circular buffer
-                    CircularFifoQueue<byte[]> fifo = cameraView.frames;
-                    if (!isRecord) {
-                        isRecord = true;
+                    CircularFifoQueue<byte[]> temp = cameraView.frames;
+                        for(byte[] frame: temp)
+                            encoder.offerEncoder(frame);
+                        encoder.close();
                         // add frames to MediaCodec buffer
                         // start adding new byte[] frames from Camera to MediaCodec buffer
-                    } else {
-                        isRecord = false;
-                        //stop adding frames
-                    }
                 }
             }
         });
@@ -157,6 +155,7 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     }
 
     private void openCamera() {
+        cameraView.setMaxFrameSize(1280,720);
         cameraView.setVisibility(SurfaceView.VISIBLE);
         cameraView.setCvCameraViewListener(this);
         cameraView.enableView();
@@ -269,6 +268,10 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
             e.printStackTrace();
             Toast.makeText(getApplicationContext(), "not saved", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private long computePresentationTime(int frameIndex) {
+        return 132 + frameIndex * 1000000 / FRAME_RATE;
     }
 }
 
