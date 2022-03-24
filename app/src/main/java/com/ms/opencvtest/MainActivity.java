@@ -36,6 +36,7 @@ import org.opencv.android.JavaCameraView;
 import org.opencv.android.OpenCVLoader;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -66,7 +67,12 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     private FileOutputStream fos;
     private int BPP = 8;
     private int FRAME_RATE = 30;
-    private AvcEncoder encoder;
+    private int generateIndex = 0;
+    private int trackIndex;
+    private boolean muxerStarted;
+    private int mHeight = 720;
+    private int mWidth = 1280;
+    private int mBitRate = 2000000;
 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -74,20 +80,19 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
         setContentView(R.layout.activity_main);
         cameraView = findViewById(R.id.surfaceView);
         btnRecord = findViewById(R.id.record);
-        path = getExternalFilesDir("/").getAbsolutePath();
-        Log.d(TAG, path);
+        cameraView.path = getExternalFilesDir("/").getAbsolutePath();
+        //Log.d(TAG, path);
         openCamera();
-        encoder = new AvcEncoder(1280,720,path+"/file");
         btnRecord.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) {
                 if (view == btnRecord) {
-                    //copy frames from circular buffer
-                    CircularFifoQueue<byte[]> temp = cameraView.frames;
-                        for(byte[] frame: temp)
-                            encoder.offerEncoder(frame);
-                        encoder.close();
-                        // add frames to MediaCodec buffer
-                        // start adding new byte[] frames from Camera to MediaCodec buffer
+                    if(!cameraView.Record){
+                        cameraView.setEncoder();
+                        cameraView.Record = true;
+                    }
+                    else{
+                        cameraView.Record = false;
+                    }
                 }
             }
         });
@@ -155,7 +160,7 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     }
 
     private void openCamera() {
-        cameraView.setMaxFrameSize(1280,720);
+        cameraView.setMaxFrameSize(mWidth,mHeight);
         cameraView.setVisibility(SurfaceView.VISIBLE);
         cameraView.setCvCameraViewListener(this);
         cameraView.enableView();
@@ -166,92 +171,6 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
         YuvImage yuv = new YuvImage(nv21, ImageFormat.NV21, width, height, null);
         yuv.compressToJpeg(new android.graphics.Rect(0, 0, width, height), quality, out);
         return out.toByteArray();
-    }
-
-    private static byte[] YUV420toNV21(Image image) {
-        android.graphics.Rect crop = image.getCropRect();
-        int format = image.getFormat();
-        int width = crop.width();
-        int height = crop.height();
-        Image.Plane[] planes = image.getPlanes();
-        byte[] data = new byte[width * height * ImageFormat.getBitsPerPixel(format) / 8];
-        byte[] rowData = new byte[planes[0].getRowStride()];
-
-        int channelOffset = 0;
-        int outputStride = 1;
-        for (int i = 0; i < planes.length; i++) {
-            switch (i) {
-                case 0:
-                    channelOffset = 0;
-                    outputStride = 1;
-                    break;
-                case 1:
-                    channelOffset = width * height + 1;
-                    outputStride = 2;
-                    break;
-                case 2:
-                    channelOffset = width * height;
-                    outputStride = 2;
-                    break;
-            }
-
-            ByteBuffer buffer = planes[i].getBuffer();
-            int rowStride = planes[i].getRowStride();
-            int pixelStride = planes[i].getPixelStride();
-
-            int shift = (i == 0) ? 0 : 1;
-            int w = width >> shift;
-            int h = height >> shift;
-            buffer.position(rowStride * (crop.top >> shift) + pixelStride * (crop.left >> shift));
-            for (int row = 0; row < h; row++) {
-                int length;
-                if (pixelStride == 1 && outputStride == 1) {
-                    length = w;
-                    buffer.get(data, channelOffset, length);
-                    channelOffset += length;
-                } else {
-                    length = (w - 1) * pixelStride + 1;
-                    buffer.get(rowData, 0, length);
-                    for (int col = 0; col < w; col++) {
-                        data[channelOffset] = rowData[col * pixelStride];
-                        channelOffset += outputStride;
-                    }
-                }
-                if (row < h - 1) {
-                    buffer.position(buffer.position() + rowStride - length);
-                }
-            }
-        }
-        return data;
-    }
-
-    public static Bitmap convertYUV(byte[] data, int width, int height, Rect crop) {
-        if (crop == null) {
-            crop = new Rect(0, 0, width, height);
-        }
-        Bitmap image = Bitmap.createBitmap(crop.width(), crop.height(), Bitmap.Config.ARGB_8888);
-        int yv = 0, uv = 0, vv = 0;
-
-        for (int y = crop.top; y < crop.bottom; y += 1) {
-            for (int x = crop.left; x < crop.right; x += 1) {
-                yv = data[y * width + x] & 0xff;
-                uv = (data[width * height + (x / 2) * 2 + (y / 2) * width + 1] & 0xff) - 128;
-                vv = (data[width * height + (x / 2) * 2 + (y / 2) * width] & 0xff) - 128;
-                image.setPixel(x, y, convertPixel(yv, uv, vv));
-            }
-        }
-        return image;
-    }
-
-    public static int convertPixel(int y, int u, int v) {
-        int r = (int) (y + 1.13983f * v);
-        int g = (int) (y - .39485f * u - .58060f * v);
-        int b = (int) (y + 2.03211f * u);
-        r = (r > 255) ? 255 : (r < 0) ? 0 : r;
-        g = (g > 255) ? 255 : (g < 0) ? 0 : g;
-        b = (b > 255) ? 255 : (b < 0) ? 0 : b;
-
-        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     public void capturePhoto() {

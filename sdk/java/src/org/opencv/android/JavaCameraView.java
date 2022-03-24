@@ -1,5 +1,8 @@
 package org.opencv.android;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
@@ -10,7 +13,11 @@ import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.hardware.Camera.PreviewCallback;
+import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaFormat;
 import android.os.Build;
+import android.os.Environment;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.Surface;
@@ -49,6 +56,14 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
     private int mPreviewFormat = ImageFormat.NV21;
     public CircularFifoQueue<byte[]> frames;
     private boolean recordingFlag = false;
+    private MediaCodec encoder;
+    private FileOutputStream outputStream;
+    private boolean outputDone = false;
+    private int FRAME_RATE = 20;
+
+    public String path;
+    private MediaFormat mediaFormat;
+    public boolean Record = false;
 
     public static class JavaCameraSizeAccessor implements ListItemAccessor {
 
@@ -169,7 +184,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
                         params.setPreviewFormat(ImageFormat.NV21);
 
                     mPreviewFormat = params.getPreviewFormat();
-
+                    Log.d(TAG,"Preview format: " + mPreviewFormat);
                     Log.d(TAG, "Set preview size to " + Integer.valueOf((int)frameSize.width) + "x" + Integer.valueOf((int)frameSize.height));
                     params.setPreviewSize((int)frameSize.width, (int)frameSize.height);
 
@@ -184,6 +199,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
 
                     mCamera.setParameters(params);
                     params = mCamera.getParameters();
+                    params.setRecordingHint(true);
 
                     mFrameWidth = params.getPreviewSize().width;
                     mFrameHeight = params.getPreviewSize().height;
@@ -269,7 +285,6 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
             return false;
 
         mCameraFrameReady = false;
-
         /* now we can start update thread */
         Log.d(TAG, "Starting processing thread");
         mStopThread = false;
@@ -306,13 +321,16 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
         mCameraFrameReady = false;
     }
 
+
     @Override
     public void onPreviewFrame(byte[] frame, Camera arg1) {
         if (BuildConfig.DEBUG)
             //Log.d(TAG, "Preview Frame received. Frame size: " + frame.length);
         synchronized (this) {
             //filling circular buffer
-            frames.add(frame);
+            if (encoder != null) {
+                encodeVideoFrameFromBuffer(frame);
+            }
             mFrameChain[mChainIdx].put(0, 0, frame);
             mCameraFrameReady = true;
             this.notify();
@@ -320,6 +338,126 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
         if (mCamera != null)
             mCamera.addCallbackBuffer(mBuffer);
     }
+
+    public void setEncoder() {
+        File file = new File(path + "/vid.mp4");
+
+        String key_mime = "video/avc"; //video/mp4v-es, video/3gpp, video/avc
+
+        try {
+            encoder = MediaCodec.createEncoderByType(key_mime);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        mediaFormat = MediaFormat.createVideoFormat(key_mime, mFrameWidth, mFrameHeight);
+
+        mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, (mFrameWidth * mFrameHeight) << 3);
+        mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 20);
+        mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar);
+        mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
+
+        encoder.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        encoder.start();
+
+        MediaFormat input = encoder.getOutputFormat();
+        MediaFormat output = encoder.getInputFormat();
+
+        Log.d(TAG, "mediaCodec set");
+    }
+
+    private void encodeVideoFrameFromBuffer(byte[] frameData) {
+        if (encoder == null) return;
+        final int TIMEOUT_USEC = 10000;
+        ByteBuffer[] encoderInputBuffers = encoder.getInputBuffers();
+        ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
+        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+
+        if (!outputDone && outputStream == null) {
+            String fileName = path + File.separator + "test" + 1280 + "x" + 720 + ".h264";
+            File file = new File(fileName);
+            if (file.exists()) {
+                file.delete();
+            }
+            try {
+                outputStream = new FileOutputStream(fileName);
+                Log.d(TAG, "encoded output will be saved as " + fileName);
+            } catch (IOException ioe) {
+                Log.w(TAG, "Unable to create debug output file " + fileName);
+                throw new RuntimeException(ioe);
+
+            }
+        }
+        if (outputStream != null) {
+            int inputBufIndex = encoder.dequeueInputBuffer(TIMEOUT_USEC);
+
+            if (inputBufIndex >= 0) {
+                long ptsUsec = (System.currentTimeMillis() * 1000) / FRAME_RATE;
+                if (outputDone) {
+                    encoder.queueInputBuffer(inputBufIndex, 0, 0, ptsUsec,
+                            MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                } else {
+                    ByteBuffer inputBuf = encoderInputBuffers[inputBufIndex];
+                    inputBuf.clear();
+                    inputBuf.put(frameData);
+                    encoder.queueInputBuffer(inputBufIndex, 0, frameData.length, ptsUsec, 0);
+                    Log.w(TAG, "Frame added to inputBuffer");
+                }
+            }
+            int encoderStatus = encoder.dequeueOutputBuffer(info, TIMEOUT_USEC);
+            if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                // no output available yet
+            } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                // not expected for an encoder
+                encoderOutputBuffers = encoder.getOutputBuffers();
+                Log.d(TAG, "encoder output buffers changed");
+            } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                MediaFormat newFormat = encoder.getOutputFormat();
+                Log.d(TAG, "encoder output format changed: " + newFormat);
+            } else if (encoderStatus < 0) {
+                Log.e(TAG, "unexpected result from encoder.dequeueOutputBuffer: " + encoderStatus);
+            } else { // encoderStatus >= 0
+                ByteBuffer encodedData = encoderOutputBuffers[encoderStatus];
+                encodedData.position(info.offset);
+                encodedData.limit(info.offset + info.size);
+
+                byte[] data = new byte[info.size];
+                encodedData.get(data);
+                encodedData.position(info.offset);
+                Log.w(TAG, "Frame encoded");
+                try {
+                    outputStream.write(data);
+                    Log.w(TAG, "Frame saved");
+                } catch (IOException ioe) {
+                    Log.w(TAG, "failed writing debug data to file");
+                    throw new RuntimeException(ioe);
+                }
+
+                encoder.releaseOutputBuffer(encoderStatus, false);
+            }
+        }
+
+        if (!Record) {
+            if (outputStream != null) {
+                stopEncoder();
+            }
+        }
+    }
+    public void stopEncoder(){
+        try {
+            encoder.stop();
+            encoder.release();
+            encoder = null;
+            outputStream.flush();
+            outputStream.close();
+            outputStream = null;
+            Log.w(TAG, "File saved");
+            Log.d(TAG, "mediaCodec released");
+        } catch (Exception e){
+            e.printStackTrace();
+        }
+    }
+
 
     private class JavaCameraFrame implements CvCameraViewFrame {
         @Override
