@@ -320,7 +320,14 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
 
         mCameraFrameReady = false;
     }
-
+    private void NV21toI420SemiPlanar(byte[] nv21bytes, byte[] i420bytes, int width,
+                                      int height) {
+        System.arraycopy(nv21bytes, 0, i420bytes, 0, width * height);
+        for (int i = width * height; i < nv21bytes.length; i += 2) {
+            i420bytes[i] = nv21bytes[i + 1];
+            i420bytes[i + 1] = nv21bytes[i];
+        }
+    }
 
     @Override
     public void onPreviewFrame(byte[] frame, Camera arg1) {
@@ -329,7 +336,9 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
         synchronized (this) {
             //filling circular buffer
             if (encoder != null) {
-                encodeVideoFrameFromBuffer(frame);
+                byte[] out = new byte[frame.length];
+                NV21toI420SemiPlanar(frame, out,1280,720);
+                encodeVideoFrameFromBuffer(out);
             }
             mFrameChain[mChainIdx].put(0, 0, frame);
             mCameraFrameReady = true;
