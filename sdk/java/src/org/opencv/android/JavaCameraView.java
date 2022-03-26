@@ -331,13 +331,16 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
 
     @Override
     public void onPreviewFrame(byte[] frame, Camera arg1) {
-        if (BuildConfig.DEBUG)
-            //Log.d(TAG, "Preview Frame received. Frame size: " + frame.length);
+
+        byte[] storeFrame = new byte[frame.length];
+        System.arraycopy(frame, 0, storeFrame, 0, frame.length);
+        frames.add(storeFrame);
+
         synchronized (this) {
-            //filling circular buffer
             if (encoder != null) {
+                Log.d(TAG,"frames size: " + frames.size());
                 byte[] out = new byte[frame.length];
-                NV21toI420SemiPlanar(frame, out,1280,720);
+                NV21toI420SemiPlanar(frames.get(0), out,1280,720);
                 encodeVideoFrameFromBuffer(out);
             }
             mFrameChain[mChainIdx].put(0, 0, frame);
@@ -375,7 +378,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
         Log.d(TAG, "mediaCodec set");
     }
 
-    private void encodeVideoFrameFromBuffer(byte[] frameData) {
+    public void encodeVideoFrameFromBuffer(byte[] frameData) {
         if (encoder == null) return;
         final int TIMEOUT_USEC = 10000;
         ByteBuffer[] encoderInputBuffers = encoder.getInputBuffers();
