@@ -25,14 +25,9 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     private JavaCameraView cameraView;
     private Mat matrix;
     private Button btnRecord;
-    private String path;
-    private boolean isRecord = false;
-    private int BPP = 8;
     private int FRAME_RATE = 30;
-    private int generateIndex = 0;
     private int mHeight = 720;
     private int mWidth = 1280;
-    private int mBitRate = 2000000;
 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -49,9 +44,12 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
                     if(!cameraView.Record){
                         cameraView.setEncoder();
                         cameraView.Record = true;
+                        cameraView.framesLeft = cameraView.frames.size();
+                        Toast.makeText(getApplicationContext(), "Recording started", Toast.LENGTH_SHORT).show();
                     }
                     else{
                         cameraView.Record = false;
+                        Toast.makeText(getApplicationContext(), "Saved", Toast.LENGTH_SHORT).show();
                     }
                 }
             }
@@ -136,7 +134,7 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     public void capturePhoto() {
         FileOutputStream fos = null;
         try {
-            fos = new FileOutputStream(path + "/photo.jpg");
+            //fos = new FileOutputStream(path + "/photo.jpg");
             Log.d(TAG, "fos setting");
             fos.write(NV21toJPEG(cameraView.frames.get(0), 1920, 1080, 50));
             Log.d(TAG, "writing");

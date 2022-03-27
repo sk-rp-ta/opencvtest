@@ -4,7 +4,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 
@@ -16,6 +19,7 @@ import android.hardware.Camera.PreviewCallback;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.os.Build;
 import android.os.Environment;
 import android.util.AttributeSet;
@@ -59,11 +63,14 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
     private MediaCodec encoder;
     private FileOutputStream outputStream;
     private boolean outputDone = false;
-    private int FRAME_RATE = 20;
+    private int FRAME_RATE = 18;
+    private int frameCounter = 0;
+    public int framesLeft;
 
     public String path;
     private MediaFormat mediaFormat;
     public boolean Record = false;
+    private MediaMuxer mediaMuxer;
 
     public static class JavaCameraSizeAccessor implements ListItemAccessor {
 
@@ -338,7 +345,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
 
         synchronized (this) {
             if (encoder != null) {
-                Log.d(TAG,"frames size: " + frames.size());
+                if(!Record) frameCounter++;
                 byte[] out = new byte[frame.length];
                 NV21toI420SemiPlanar(frames.get(0), out,1280,720);
                 encodeVideoFrameFromBuffer(out);
@@ -352,8 +359,6 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
     }
 
     public void setEncoder() {
-        File file = new File(path + "/vid.mp4");
-
         String key_mime = "video/avc"; //video/mp4v-es, video/3gpp, video/avc
 
         try {
@@ -365,32 +370,30 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
         mediaFormat = MediaFormat.createVideoFormat(key_mime, mFrameWidth, mFrameHeight);
 
         mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, (mFrameWidth * mFrameHeight) << 3);
-        mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 20);
+        mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 18);
         mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar);
-        mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
+        mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
 
         encoder.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         encoder.start();
-
-        MediaFormat input = encoder.getOutputFormat();
-        MediaFormat output = encoder.getInputFormat();
 
         Log.d(TAG, "mediaCodec set");
     }
 
     public void encodeVideoFrameFromBuffer(byte[] frameData) {
-        if (encoder == null) return;
+        //if (encoder == null) return;
         final int TIMEOUT_USEC = 10000;
         ByteBuffer[] encoderInputBuffers = encoder.getInputBuffers();
         ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
 
         if (!outputDone && outputStream == null) {
-            String fileName = path + File.separator + "test" + 1280 + "x" + 720 + ".h264";
+
+            Date date = Calendar.getInstance().getTime();
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy_mm_dd_hh_mm_ss");
+            String fileName = path + File.separator + dateFormat.format(date)+ ".h264";
             File file = new File(fileName);
-            if (file.exists()) {
-                file.delete();
-            }
+
             try {
                 outputStream = new FileOutputStream(fileName);
                 Log.d(TAG, "encoded output will be saved as " + fileName);
@@ -449,7 +452,7 @@ public class JavaCameraView extends CameraBridgeViewBase implements PreviewCallb
             }
         }
 
-        if (!Record) {
+        if (!Record && framesLeft == frameCounter) {
             if (outputStream != null) {
                 stopEncoder();
             }
